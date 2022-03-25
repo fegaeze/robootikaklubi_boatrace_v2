@@ -1,1 +1,1 @@
-# robotikluubi_boatrace
+# Robotics Club Boat Race
