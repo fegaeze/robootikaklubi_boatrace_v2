@@ -69,49 +69,51 @@ static void MX_TIM17_Init(void);
 /* USER CODE BEGIN 0 */
 
 /*
- * READ ADC SIGNAL
+ * READ POWER BUTTON STATE
+ */
+//int readPowerBtn(int powerBtnState) {
+//	  if (powerBtnState) {
+//	    block = 0;
+//
+//	    if (!byteStream && buttonState) {
+//	      byteStream = 1;
+//	      buttonState = 0;
+//	      return buttonState;
+//	    } else if (!byteStream && !buttonState) {
+//	      byteStream = 1;
+//	      buttonState = 1;
+//	      return buttonState;
+//	    } else {
+//	      return buttonState;
+//	    }
+//
+//	  } else {
+//	    byteStream = 0;
+//	    return buttonState;
+//	  }
+//}
+
+
+/*
+ * Read IR sensor value:
+ * Update ADC channel config
+ * Start, convert and read sensor value
  */
 uint16_t ADC_Read(ADC_HandleTypeDef* hadc, uint8_t channel)
 {
-	ADC_ChannelConfTypeDef sConfig;
+  ADC_ChannelConfTypeDef sConfig;
 
-	sConfig.Channel = channel;
-	sConfig.Rank = 1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  sConfig.Channel = channel;
+  sConfig.Rank = 1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
 
-	HAL_ADC_ConfigChannel(hadc, &sConfig);
+  HAL_ADC_ConfigChannel(hadc, &sConfig);
 
-	HAL_ADC_Start(hadc);
-	HAL_ADC_PollForConversion(hadc, 10);
+  HAL_ADC_Start(hadc);
+  HAL_ADC_PollForConversion(hadc, 10);
 
-	return HAL_ADC_GetValue(hadc);
+  return HAL_ADC_GetValue(hadc);
 }
-
-/*
- * READ POWER BUTTON STATE
- */
-int readPowerBtn(int powerBtnState) {
-	  if (powerBtnState) {
-	    block = 0;
-
-	    if (!byteStream && buttonState) {
-	      byteStream = 1;
-	      buttonState = 0;
-	      return buttonState;
-	    } else if (!byteStream && !buttonState) {
-	      byteStream = 1;
-	      buttonState = 1;
-	      return buttonState;
-	    } else {
-	      return buttonState;
-	    }
-
-	  } else {
-	    byteStream = 0;
-	    return buttonState;
-	  }
-}
-
 
 /*
  * Set Motor Speed:
@@ -223,13 +225,18 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  int powerBtnState = HAL_GPIO_ReadPin(POWER_BTN_GPIO_Port, POWER_BTN_Pin);
+//	int powerBtnState = HAL_GPIO_ReadPin(POWER_BTN_GPIO_Port, POWER_BTN_Pin);
+//	if (readPowerBtn(powerBtnState) == 1) {
+//		uint16_t ir_left = ADC_Read(&hadc1, ADC_CHANNEL_1);
+//		uint16_t ir_center = ADC_Read(&hadc1, ADC_CHANNEL_2);
+//		uint16_t ir_right = ADC_Read(&hadc1, ADC_CHANNEL_4);
+//	}
 
-	  if (readPowerBtn(powerBtnState) == 1) {
-  //		  uint16_t ir_left = ADC_Read(&hadc1, ADC_CHANNEL_1);
-  //		  uint16_t ir_center = ADC_Read(&hadc1, ADC_CHANNEL_2);
-  //		  uint16_t ir_right = ADC_Read(&hadc1, ADC_CHANNEL_4);
-	  }
+	if (buttonState == 1) {
+	//		  uint16_t ir_left = ADC_Read(&hadc1, ADC_CHANNEL_1);
+	//		  uint16_t ir_center = ADC_Read(&hadc1, ADC_CHANNEL_2);
+	//		  uint16_t ir_right = ADC_Read(&hadc1, ADC_CHANNEL_4);
+	} else;
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -553,13 +560,26 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : POWER_BTN_Pin */
   GPIO_InitStruct.Pin = POWER_BTN_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(POWER_BTN_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+ * @brief External switch ISR Handler callback function
+ * Check if source is power button, toggle button state
+ */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == POWER_BTN_Pin) { buttonState = !buttonState; }
+}
 
 /* USER CODE END 4 */
 
