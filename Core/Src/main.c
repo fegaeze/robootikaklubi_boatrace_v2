@@ -192,6 +192,19 @@ int calcServoRotation(float turningAngle) {
 }
 
 /*
+ * Calculate Motor Speed:
+ * Given an angle, map to servo values within
+ * the range 500 -> 2500 where 500 is -90 degrees
+ * and 2500 is 90 degrees
+ *
+ * Formular:
+ * https://stackoverflow.com/questions/5731863/mapping-a-numeric-range-onto-another
+ */
+int calcMotorSpeed(float directionAmount) {
+	return 500 + round(11.11 * (directionAmount + 90));
+}
+
+/*
  * Calculate best path:
  * Boat should always move in the direction with the best possible space
  */
@@ -202,12 +215,12 @@ void calcBestPath(uint16_t ir_left, uint16_t ir_center, uint16_t ir_right, float
 	float net_vertical, net_horizontal;
 
     // Resolve left sensor readings to vertical and horizontal plane
-	vv_left = sinf(sensor_angle) * ir_left;
-	vh_left = cosf(sensor_angle) * ir_left;
+	vv_left = sinf(sensor_angle * (M_PI / 180.0)) * ir_left;
+	vh_left = cosf(sensor_angle * (M_PI / 180.0)) * ir_left;
 
 	// Resolve right sensor readings to vertical and horizontal plane
-	vv_right = sinf(sensor_angle) * ir_right;
-	vh_right = cosf(sensor_angle) * ir_right;
+	vv_right = sinf(sensor_angle * (M_PI / 180.0)) * ir_right;
+	vh_right = cosf(sensor_angle * (M_PI / 180.0)) * ir_right;
 
 	// Calculate sum of all three vectors
 	net_vertical = vv_left + ir_center + vv_right;
@@ -215,8 +228,8 @@ void calcBestPath(uint16_t ir_left, uint16_t ir_center, uint16_t ir_right, float
 
 	// Calculate angle servo motor should turn as well as approximate value for free space.
 	// Free space amount will be used to control speed.
-	*turningAngle = atanf(net_horizontal / net_vertical);
-	*directionAmount = sqrtf((net_horizontal * 2) + (net_vertical * 2));
+	*turningAngle = atanf(net_horizontal / net_vertical) / (M_PI / 180.0);
+	*directionAmount = sqrtf(powf(net_horizontal, 2) + powf(net_vertical, 2));
 }
 
 /*
@@ -276,7 +289,7 @@ int main(void)
   HAL_TIM_PWM_Start(&htim17, TIM_CHANNEL_1);
 
 
-  // Start up code
+  // Start up code => What's should startup behaviour be?
 
   /* USER CODE END 2 */
 
@@ -295,15 +308,7 @@ int main(void)
 			setMotionSettings(turningAngle, directionAmount);
 			moveForward();
 
-
-
-			// TODO -> 5 seconds time delay before it starts
-
-			// TODO -> Read values from sensor
-
-
-
-			// TODO -> Check if values is within threshold to take action
+			// Check if values is within threshold to take action
 
 			/* If values are within threshold take following action:
 			 *  Only left is within threshold -> turn right
