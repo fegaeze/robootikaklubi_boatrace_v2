@@ -66,11 +66,39 @@ static void MX_ADC1_Init(void);
 static void MX_TIM17_Init(void);
 /* USER CODE BEGIN PFP */
 
+static void setMotorSpeed(uint8_t motor_speed);
+static void setInitialState(uint8_t powerBtnState);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+
+/*
+ * Set Initial State:
+ * Turn servo motor to center
+ * Delay for 5 seconds
+ * Set speed to highest settings
+ */
+void setInitialState(uint8_t powerBtnState)
+{
+	if (powerBtnState == 1) {
+	  __HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, 1500);
+	  HAL_Delay(5000);
+	  setMotorSpeed(255);
+	}
+}
+
+/*
+ * Set Motor Speed:
+ * motor_speed => 0 -> 255
+ */
+void setMotorSpeed(uint8_t motor_speed)
+{
+	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, motor_speed); // RIGHT_DM_PHASE
+	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, motor_speed); // LEFT_DM_PHASE
+}
 
 /*
  * Read IR sensor value:
@@ -93,43 +121,6 @@ uint16_t ADC_Read(ADC_HandleTypeDef* hadc, uint8_t channel)
   return HAL_ADC_GetValue(hadc);
 }
 
-
-/*
- * READ POWER BUTTON STATE
- */
-int togglePowerBtn(int powerBtnState) {
-	//  int readButtonNow = ; // read button, if pressed 1, if not 0
-	if (powerBtnState) { // if button was pressed
-		block = 0;
-		if (!byteStream && buttonState) { // if byte stream is 0 (which means, that since last toggle some time has passed) AND button has a state of 1
-		  byteStream = 1; // make now byte stream to output 1
-		  buttonState = 0; // change button's state
-		  return buttonState;
-		} else if (!byteStream && !buttonState) { // --||-- and button's state is 0
-		  byteStream = 1; // --||--
-		  buttonState = 1; // change button's state
-		  return buttonState;
-		} else { // if byte stream is 1, then just return button's state you currently have
-		  return buttonState;
-		}
-	} else { // if button is not pressed, make byte stream as 0 and return current button's state
-		byteStream = 0;
-		return buttonState;
-	}
-}
-
-
-/*
- * Set Motor Speed:
- * motor_speed => 0 -> 100 (in percent)
- */
-void setMotorSpeed(int motor_speed)
-{
-	int value = (motor_speed * 255) / 100;
-	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, value); // RIGHT_DM_PHASE
-	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, value); // LEFT_DM_PHASE
-}
-
 /*
  * Move Forward:
  * xPhase => 0
@@ -149,34 +140,6 @@ void moveBackward()
 	HAL_GPIO_WritePin(RIGHT_DM_PHASE_GPIO_Port, RIGHT_DM_PHASE_Pin, GPIO_PIN_SET);
 	HAL_GPIO_WritePin(LEFT_DM_PHASE_GPIO_Port, LEFT_DM_PHASE_Pin, GPIO_PIN_SET);
 }
-
-/*
- * Turn Left:
- * Set Servo Motor Left
- */
-void turnLeft()
-{
-	__HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, 500);
-}
-
-/*
- * Turn Right:
- * Set Servo Motor Right
- */
-void turnRight()
-{
-	__HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, 2500);
-}
-
-/*
- * Turn Center:
- * Set Servo MotorCenter
- */
-void turnCenter()
-{
-	__HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, 1500);
-}
-
 
 /*
  * Calculate Servo Rotation:
@@ -239,7 +202,6 @@ void calcBestPath(uint16_t ir_left, uint16_t ir_center, uint16_t ir_right, float
 void setMotionSettings(float turningAngle, float directionAmount)
 {
 	int rotation = calcServoRotation(turningAngle);
-
 	__HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, rotation);
 }
 
@@ -279,6 +241,7 @@ int main(void)
   MX_TIM17_Init();
   /* USER CODE BEGIN 2 */
 
+  uint8_t powerBtnState;
   uint16_t ir_left, ir_center, ir_right;
   float turningAngle, directionAmount;
 
@@ -288,8 +251,8 @@ int main(void)
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   HAL_TIM_PWM_Start(&htim17, TIM_CHANNEL_1);
 
-
-  // Start up code => What's should startup behaviour be?
+  powerBtnState = HAL_GPIO_ReadPin(POWER_BTN_GPIO_Port, POWER_BTN_Pin);
+  setInitialState(powerBtnState);
 
   /* USER CODE END 2 */
 
@@ -297,51 +260,17 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-		int powerBtnState = HAL_GPIO_ReadPin(POWER_BTN_GPIO_Port, POWER_BTN_Pin);
+		powerBtnState = HAL_GPIO_ReadPin(POWER_BTN_GPIO_Port, POWER_BTN_Pin);
 
-		if (togglePowerBtn(powerBtnState) == 1) {
+		if (powerBtnState == 1) {
 			ir_left = ADC_Read(&hadc1, ADC_CHANNEL_1);
 			ir_center = ADC_Read(&hadc1, ADC_CHANNEL_2);
 			ir_right = ADC_Read(&hadc1, ADC_CHANNEL_4);
 
 			calcBestPath(ir_left, ir_center, ir_right, &turningAngle, &directionAmount);
 			setMotionSettings(turningAngle, directionAmount);
+
 			moveForward();
-
-			// Check if values is within threshold to take action
-
-			/* If values are within threshold take following action:
-			 *  Only left is within threshold -> turn right
-			 *  Only right is within threshold -> turn left
-			 *  Left and Right is within threshold -> Reverse until this condition changes, then take action
-			 *
-			 *  Center is within threshold ->
-			 *  Left or Right is not within threshold -> Reverse a bit, compare left or right, take action based on lower side.
-			 *  Left or Right is within threshold -> Take action for side within threshold
-			 *  Left and Right is within threshold -> Reverse until this condition changes, then take action
-			 *
-			 *  if left or right suggest <10cm, take action for the other direction
-			 *
-			 *  if center suggest <10cm, reverse first before taking the above steps
-			 */
-
-			/* If all values are above thresholds:
-			 *  Go Forward
-			 */
-
-			/* Only when turn happens, to guard against deadlocks based off decision:
-			 * Store last turn direction that action was taken based off of
-			 * Center is within threshold ->
-			 * Left or Right is not within threshold -> reverse a bit, turn right for left and vice versa
-			 */
-
-			// https://www.youtube.com/watch?v=FGTyBXe6GtM
-			// https://www.youtube.com/watch?v=UUFkcxxOHaU
-
-
-			/* Tangent Bug Algorithms:
-			 * https://www.youtube.com/watch?v=oHN-y0YoUko
-			 */
 		}
     /* USER CODE END WHILE */
 
