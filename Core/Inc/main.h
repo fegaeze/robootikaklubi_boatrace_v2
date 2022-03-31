@@ -77,7 +77,6 @@ void Error_Handler(void);
 #define LEFT_DM_PHASE_GPIO_Port GPIOA
 #define POWER_BTN_Pin GPIO_PIN_12
 #define POWER_BTN_GPIO_Port GPIOA
-#define POWER_BTN_EXTI_IRQn EXTI15_10_IRQn
 #define SWDIO_Pin GPIO_PIN_13
 #define SWDIO_GPIO_Port GPIOA
 #define SWCLK_Pin GPIO_PIN_14
