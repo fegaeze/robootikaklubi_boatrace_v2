@@ -18,20 +18,27 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include <math.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <math.h>
 
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
+typedef struct {
+  float distance;
+  float adcVal;
+} S_DIST_ADC_MAP;
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define DISTANCE_MAX    150
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -55,6 +62,24 @@ int buttonState = 0;
 
 float sensor_angle = 45.0;
 
+S_DIST_ADC_MAP distAdcMap[] = {
+  {10,  4096},
+  {20,  2600},
+  {30,  1900},
+  {40,  1500},
+  {50,  1200},
+  {60,  1200},
+  {70,  1100},
+  {80,  1100},
+  {90,  1000},
+  {100, 1000},
+  {110, 1000},
+  {120, 950},
+  {130, 900},
+  {140, 800},
+  {150, 500},
+};
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -74,6 +99,29 @@ static void setInitialState(uint8_t powerBtnState);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+/*
+ * READ POWER BUTTON STATE
+ */
+int togglePowerBtn(int powerBtnState) {
+	//  int readButtonNow = ; // read button, if pressed 1, if not 0
+	if (powerBtnState) { // if button was pressed
+		block = 0;
+		if (!byteStream && buttonState) { // if byte stream is 0 (which means, that since last toggle some time has passed) AND button has a state of 1
+		  byteStream = 1; // make now byte stream to output 1
+		  buttonState = 0; // change button's state
+		  return buttonState;
+		} else if (!byteStream && !buttonState) { // --||-- and button's state is 0
+		  byteStream = 1; // --||--
+		  buttonState = 1; // change button's state
+		  return buttonState;
+		} else { // if byte stream is 1, then just return button's state you currently have
+		  return buttonState;
+		}
+	} else { // if button is not pressed, make byte stream as 0 and return current button's state
+		byteStream = 0;
+		return buttonState;
+	}
+}
 
 /*
  * Set Initial State:
@@ -83,7 +131,7 @@ static void setInitialState(uint8_t powerBtnState);
  */
 void setInitialState(uint8_t powerBtnState)
 {
-	if (powerBtnState == 1) {
+	if (togglePowerBtn(powerBtnState) == 1) {
 	  __HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, 1500);
 	  HAL_Delay(5000);
 	  setMotorSpeed(255);
@@ -156,15 +204,38 @@ int calcServoRotation(float turningAngle) {
 
 /*
  * Calculate Motor Speed:
- * Given an angle, map to servo values within
- * the range 500 -> 2500 where 500 is -90 degrees
- * and 2500 is 90 degrees
+ * Given an angle, map to motor values within
+ * the range 0 -> 255 where 0 is 21 and 255 is 363
  *
  * Formular:
  * https://stackoverflow.com/questions/5731863/mapping-a-numeric-range-onto-another
  */
-int calcMotorSpeed(float directionAmount) {
-	return 500 + round(11.11 * (directionAmount + 90));
+float calcMotorSpeed(float directionAmount) {
+	return round(0.745614 * (directionAmount - 21));
+}
+
+/*
+ * Get Distance:
+ * Map ADC values to distance (in cm) based on predetermined measurements.
+ *
+ * https://www.hackster.io/tothmiki91/infrared-radar-with-sharp-distance-sensor-91554a
+ */
+float getDistance(float adcVal)
+{
+  float distance = DISTANCE_MAX;
+
+  // Linear interpolation from measured ADC value and MAP.
+  for (int i = 1; i < (sizeof(distAdcMap)/sizeof(S_DIST_ADC_MAP)); i++)
+  {
+    if (adcVal > distAdcMap[i].adcVal)
+    {
+      float factor = (adcVal - distAdcMap[i].adcVal)/(distAdcMap[i-1].adcVal - distAdcMap[i].adcVal);
+      distance = factor * (distAdcMap[i-1].distance - distAdcMap[i].distance) + distAdcMap[i].distance;
+      break;
+    }
+  }
+
+  return distance;
 }
 
 /*
@@ -201,8 +272,11 @@ void calcBestPath(uint16_t ir_left, uint16_t ir_center, uint16_t ir_right, float
  */
 void setMotionSettings(float turningAngle, float directionAmount)
 {
-	int rotation = calcServoRotation(turningAngle);
+	float speed = calcMotorSpeed(directionAmount);
+	uint16_t rotation = calcServoRotation(turningAngle);
+
 	__HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, rotation);
+	setMotorSpeed(speed);
 }
 
 /* USER CODE END 0 */
@@ -249,6 +323,7 @@ int main(void)
   HAL_TIM_Base_Start(&htim17);
 
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim17, TIM_CHANNEL_1);
 
   powerBtnState = HAL_GPIO_ReadPin(POWER_BTN_GPIO_Port, POWER_BTN_Pin);
@@ -262,10 +337,10 @@ int main(void)
   {
 		powerBtnState = HAL_GPIO_ReadPin(POWER_BTN_GPIO_Port, POWER_BTN_Pin);
 
-		if (powerBtnState == 1) {
-			ir_left = ADC_Read(&hadc1, ADC_CHANNEL_1);
-			ir_center = ADC_Read(&hadc1, ADC_CHANNEL_2);
-			ir_right = ADC_Read(&hadc1, ADC_CHANNEL_4);
+		if (togglePowerBtn(powerBtnState) == 1) {
+			ir_left = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_1));
+			ir_center = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_2));
+			ir_right = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_4));
 
 			calcBestPath(ir_left, ir_center, ir_right, &turningAngle, &directionAmount);
 			setMotionSettings(turningAngle, directionAmount);
