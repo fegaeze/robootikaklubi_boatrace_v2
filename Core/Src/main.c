@@ -37,7 +37,9 @@ typedef struct {
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define DISTANCE_MAX    150
+#define DISTANCE_MAX          40
+#define DISTANCE_MIN          10
+#define DISTANCE_THRESHOLD    0
 
 /* USER CODE END PD */
 
@@ -63,21 +65,13 @@ int buttonState = 0;
 float sensor_angle = 45.0;
 
 S_DIST_ADC_MAP distAdcMap[] = {
-  {10,  4096},
-  {20,  2600},
-  {30,  1900},
-  {40,  1500},
-  {50,  1200},
-  {60,  1200},
-  {70,  1100},
-  {80,  1100},
-  {90,  1000},
-  {100, 1000},
-  {110, 1000},
-  {120, 950},
-  {130, 900},
-  {140, 800},
-  {150, 500},
+  {10,  2352},
+  {15,  1540},
+  {20,  1134},
+  {25,  932},
+  {30,  868},
+  {35,  793},
+  {40,  570}
 };
 
 /* USER CODE END PV */
@@ -231,11 +225,16 @@ float getDistance(float adcVal)
     {
       float factor = (adcVal - distAdcMap[i].adcVal)/(distAdcMap[i-1].adcVal - distAdcMap[i].adcVal);
       distance = factor * (distAdcMap[i-1].distance - distAdcMap[i].distance) + distAdcMap[i].distance;
+      distance -= DISTANCE_THRESHOLD;
       break;
     }
   }
 
-  return distance;
+  if(distance <= DISTANCE_MIN){
+	  return DISTANCE_MIN;
+  } else {
+	  return distance;
+  }
 }
 
 /*
@@ -262,7 +261,7 @@ void calcBestPath(uint16_t ir_left, uint16_t ir_center, uint16_t ir_right, float
 
 	// Calculate angle servo motor should turn as well as approximate value for free space.
 	// Free space amount will be used to control speed.
-	*turningAngle = atanf(net_horizontal / net_vertical) / (M_PI / 180.0);
+	*turningAngle = atanf(net_horizontal / net_vertical) / (M_PI / 180.0) * 2;
 	*directionAmount = sqrtf(powf(net_horizontal, 2) + powf(net_vertical, 2));
 }
 
@@ -272,11 +271,11 @@ void calcBestPath(uint16_t ir_left, uint16_t ir_center, uint16_t ir_right, float
  */
 void setMotionSettings(float turningAngle, float directionAmount)
 {
-	float speed = calcMotorSpeed(directionAmount);
+	// float speed = calcMotorSpeed(directionAmount);
 	uint16_t rotation = calcServoRotation(turningAngle);
 
 	__HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, rotation);
-	setMotorSpeed(speed);
+	setMotorSpeed(255);
 }
 
 /* USER CODE END 0 */
@@ -342,10 +341,19 @@ int main(void)
 			ir_center = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_2));
 			ir_right = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_4));
 
+//			char message[500];
+//			int length = sprintf(message, "%d, %d, %d, %f\n\r", ADC_Read(&hadc1, ADC_CHANNEL_1),ADC_Read(&hadc1, ADC_CHANNEL_2), ADC_Read(&hadc1, ADC_CHANNEL_4), turningAngle);
+//			HAL_UART_Transmit(&huart2, message, length, 100);
+//
+//			HAL_Delay(1000);
+
 			calcBestPath(ir_left, ir_center, ir_right, &turningAngle, &directionAmount);
 			setMotionSettings(turningAngle, directionAmount);
 
 			moveForward();
+		} else {
+			__HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, 1500);
+			setMotorSpeed(0);
 		}
     /* USER CODE END WHILE */
 
