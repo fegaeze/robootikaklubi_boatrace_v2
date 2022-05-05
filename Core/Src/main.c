@@ -37,9 +37,11 @@ typedef struct {
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define DISTANCE_MAX          40
+#define DISTANCE_MAX          150
 #define DISTANCE_MIN          10
 #define DISTANCE_THRESHOLD    0
+#define STEERING_CONSTANT     2.855 // Maximum value for steering constant
+#define SPEED_LIMIT           30 // Maximum speed limit in cm
 
 /* USER CODE END PD */
 
@@ -63,16 +65,6 @@ int byteStream = 0;
 int buttonState = 0;
 
 float sensor_angle = 45.0;
-
-S_DIST_ADC_MAP distAdcMap[] = {
-  {10,  2352},
-  {15,  1540},
-  {20,  1134},
-  {25,  932},
-  {30,  868},
-  {35,  793},
-  {40,  570}
-};
 
 /* USER CODE END PV */
 
@@ -163,13 +155,14 @@ uint16_t ADC_Read(ADC_HandleTypeDef* hadc, uint8_t channel)
   return HAL_ADC_GetValue(hadc);
 }
 
+
 /*
  * Move Forward:
  * xPhase => 0
  */
 void moveForward()
 {
-	HAL_GPIO_WritePin(RIGHT_DM_PHASE_GPIO_Port, RIGHT_DM_PHASE_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(RIGHT_DM_PHASE_GPIO_Port, RIGHT_DM_PHASE_Pin, GPIO_PIN_SET);
 	HAL_GPIO_WritePin(LEFT_DM_PHASE_GPIO_Port, LEFT_DM_PHASE_Pin, GPIO_PIN_RESET);
 }
 
@@ -179,7 +172,7 @@ void moveForward()
  */
 void moveBackward()
 {
-	HAL_GPIO_WritePin(RIGHT_DM_PHASE_GPIO_Port, RIGHT_DM_PHASE_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(RIGHT_DM_PHASE_GPIO_Port, RIGHT_DM_PHASE_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LEFT_DM_PHASE_GPIO_Port, LEFT_DM_PHASE_Pin, GPIO_PIN_SET);
 }
 
@@ -193,19 +186,36 @@ void moveBackward()
  * https://stackoverflow.com/questions/5731863/mapping-a-numeric-range-onto-another
  */
 int calcServoRotation(float turningAngle) {
-	return 500 + round(11.11 * (turningAngle + 90));
+	float rotation = 500 + round(11.11 * (turningAngle + 90));
+
+	if(rotation <= 500) {
+		return 500;
+	} else if (rotation >= 2500) {
+		return 2500;
+	} else {
+		return rotation;
+	}
 }
 
 /*
  * Calculate Motor Speed:
  * Given an angle, map to motor values within
- * the range 0 -> 255 where 0 is 21 and 255 is 363
+ * the range 0 -> 255 where 0 is 10 and 255 is SPEED_LIMIT
  *
  * Formular:
  * https://stackoverflow.com/questions/5731863/mapping-a-numeric-range-onto-another
+ * (output_end - output_start) / (input_end - input_start)
  */
 float calcMotorSpeed(float directionAmount) {
-	return round(0.745614 * (directionAmount - 21));
+	float speed = round(0.68 * (directionAmount - 25));
+
+	if(speed <= 20) {
+		return 20;
+	} else if (speed >= 255) {
+		return 255;
+	} else {
+		return speed;
+	}
 }
 
 /*
@@ -216,22 +226,16 @@ float calcMotorSpeed(float directionAmount) {
  */
 float getDistance(float adcVal)
 {
-  float distance = DISTANCE_MAX;
+  float max_distance = DISTANCE_MAX;
+  float min_distance = DISTANCE_MIN;
+  float distance = 39451.3 / powf(adcVal, 1.07);
 
-  // Linear interpolation from measured ADC value and MAP.
-  for (int i = 1; i < (sizeof(distAdcMap)/sizeof(S_DIST_ADC_MAP)); i++)
-  {
-    if (adcVal > distAdcMap[i].adcVal)
-    {
-      float factor = (adcVal - distAdcMap[i].adcVal)/(distAdcMap[i-1].adcVal - distAdcMap[i].adcVal);
-      distance = factor * (distAdcMap[i-1].distance - distAdcMap[i].distance) + distAdcMap[i].distance;
-      distance -= DISTANCE_THRESHOLD;
-      break;
-    }
-  }
+  distance -= DISTANCE_THRESHOLD;
 
-  if(distance <= DISTANCE_MIN){
-	  return DISTANCE_MIN;
+  if(distance >= DISTANCE_MAX) {
+	  return max_distance;
+  } else if(distance <= DISTANCE_MIN) {
+	  return min_distance;
   } else {
 	  return distance;
   }
@@ -261,7 +265,7 @@ void calcBestPath(uint16_t ir_left, uint16_t ir_center, uint16_t ir_right, float
 
 	// Calculate angle servo motor should turn as well as approximate value for free space.
 	// Free space amount will be used to control speed.
-	*turningAngle = atanf(net_horizontal / net_vertical) / (M_PI / 180.0) * 2;
+	*turningAngle = atanf(net_horizontal / net_vertical) / (M_PI / 180.0) * STEERING_CONSTANT;
 	*directionAmount = sqrtf(powf(net_horizontal, 2) + powf(net_vertical, 2));
 }
 
@@ -269,13 +273,18 @@ void calcBestPath(uint16_t ir_left, uint16_t ir_center, uint16_t ir_right, float
  * Set Motion Settings:
  * Based on path calculation, configure servo and speed PWM
  */
-void setMotionSettings(float turningAngle, float directionAmount)
+void setMotionSettings(float turningAngle, float directionAmount, float avgDistance)
 {
-	// float speed = calcMotorSpeed(directionAmount);
+	 float speed = calcMotorSpeed(directionAmount);
 	uint16_t rotation = calcServoRotation(turningAngle);
 
 	__HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, rotation);
-	setMotorSpeed(255);
+
+	if(avgDistance <= SPEED_LIMIT) {
+		setMotorSpeed(speed);
+	} else {
+		setMotorSpeed(255);
+	}
 }
 
 /* USER CODE END 0 */
@@ -316,7 +325,7 @@ int main(void)
 
   uint8_t powerBtnState;
   uint16_t ir_left, ir_center, ir_right;
-  float turningAngle, directionAmount;
+  float turningAngle, directionAmount, avg_distance;
 
   HAL_TIM_Base_Start(&htim1);
   HAL_TIM_Base_Start(&htim17);
@@ -341,14 +350,10 @@ int main(void)
 			ir_center = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_2));
 			ir_right = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_4));
 
-//			char message[500];
-//			int length = sprintf(message, "%d, %d, %d, %f\n\r", ADC_Read(&hadc1, ADC_CHANNEL_1),ADC_Read(&hadc1, ADC_CHANNEL_2), ADC_Read(&hadc1, ADC_CHANNEL_4), turningAngle);
-//			HAL_UART_Transmit(&huart2, message, length, 100);
-//
-//			HAL_Delay(1000);
+			avg_distance = (ir_left + ir_center + ir_right) / 3;
 
 			calcBestPath(ir_left, ir_center, ir_right, &turningAngle, &directionAmount);
-			setMotionSettings(turningAngle, directionAmount);
+			setMotionSettings(turningAngle, directionAmount, avg_distance);
 
 			moveForward();
 		} else {
