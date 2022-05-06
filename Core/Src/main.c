@@ -226,9 +226,12 @@ float calcMotorSpeed(float directionAmount) {
  */
 float getDistance(float adcVal)
 {
+  float voltageVal = (3.3 * adcVal) / 4096;
+
   float max_distance = DISTANCE_MAX;
   float min_distance = DISTANCE_MIN;
-  float distance = 39451.3 / powf(adcVal, 1.07);
+
+  float distance = 23.4993 / powf(voltageVal, 1.7);
 
   distance -= DISTANCE_THRESHOLD;
 
