@@ -40,7 +40,6 @@ typedef struct {
 #define DISTANCE_MAX          150
 #define DISTANCE_MIN          10
 #define DISTANCE_THRESHOLD    0
-#define STEERING_CONSTANT     2.855 // Maximum value for steering constant
 #define SPEED_LIMIT           30 // Maximum speed limit in cm
 
 /* USER CODE END PD */
@@ -64,8 +63,6 @@ int block = 0;
 int byteStream = 0;
 int buttonState = 0;
 
-float sensor_angle = 45.0;
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -77,61 +74,36 @@ static void MX_ADC1_Init(void);
 static void MX_TIM17_Init(void);
 /* USER CODE BEGIN PFP */
 
-static void setMotorSpeed(uint8_t motor_speed);
 static void setInitialState(uint8_t powerBtnState);
+static void setMotorSpeed(uint8_t ms_right, uint8_t ms_left);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+
 /*
- * READ POWER BUTTON STATE
+ * Toggle Robot Start Button
  */
 int togglePowerBtn(int powerBtnState) {
-	//  int readButtonNow = ; // read button, if pressed 1, if not 0
-	if (powerBtnState) { // if button was pressed
+	if (powerBtnState) {
 		block = 0;
-		if (!byteStream && buttonState) { // if byte stream is 0 (which means, that since last toggle some time has passed) AND button has a state of 1
-		  byteStream = 1; // make now byte stream to output 1
-		  buttonState = 0; // change button's state
+		if (!byteStream && buttonState) {
+		  byteStream = 1;
+		  buttonState = 0;
 		  return buttonState;
-		} else if (!byteStream && !buttonState) { // --||-- and button's state is 0
-		  byteStream = 1; // --||--
-		  buttonState = 1; // change button's state
+		} else if (!byteStream && !buttonState) {
+		  byteStream = 1;
+		  buttonState = 1;
 		  return buttonState;
-		} else { // if byte stream is 1, then just return button's state you currently have
+		} else {
 		  return buttonState;
 		}
-	} else { // if button is not pressed, make byte stream as 0 and return current button's state
+	} else {
 		byteStream = 0;
 		return buttonState;
 	}
-}
-
-/*
- * Set Initial State:
- * Turn servo motor to center
- * Delay for 5 seconds
- * Set speed to highest settings
- */
-void setInitialState(uint8_t powerBtnState)
-{
-	if (togglePowerBtn(powerBtnState) == 1) {
-	  __HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, 1500);
-	  HAL_Delay(5000);
-	  setMotorSpeed(255);
-	}
-}
-
-/*
- * Set Motor Speed:
- * motor_speed => 0 -> 255
- */
-void setMotorSpeed(uint8_t motor_speed)
-{
-	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, motor_speed); // RIGHT_DM_PHASE
-	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, motor_speed); // LEFT_DM_PHASE
 }
 
 /*
@@ -155,6 +127,26 @@ uint16_t ADC_Read(ADC_HandleTypeDef* hadc, uint8_t channel)
   return HAL_ADC_GetValue(hadc);
 }
 
+/*
+ * Set Initial State:
+ * Set speed to highest settings
+ */
+void setInitialState(uint8_t powerBtnState)
+{
+	if (togglePowerBtn(powerBtnState) == 1) {
+	  setMotorSpeed(255, 255);
+	}
+}
+
+/*
+ * Set Motor Speed:
+ * motor_speed => 0 -> 255
+ */
+void setMotorSpeed(uint8_t ms_right, uint8_t ms_left)
+{
+	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, ms_right);
+	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, ms_left);
+}
 
 /*
  * Move Forward:
@@ -162,9 +154,10 @@ uint16_t ADC_Read(ADC_HandleTypeDef* hadc, uint8_t channel)
  */
 void moveForward()
 {
-	HAL_GPIO_WritePin(RIGHT_DM_PHASE_GPIO_Port, RIGHT_DM_PHASE_Pin, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(RIGHT_DM_PHASE_GPIO_Port, RIGHT_DM_PHASE_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LEFT_DM_PHASE_GPIO_Port, LEFT_DM_PHASE_Pin, GPIO_PIN_RESET);
 }
+
 
 /*
  * Move Backward:
@@ -172,30 +165,10 @@ void moveForward()
  */
 void moveBackward()
 {
-	HAL_GPIO_WritePin(RIGHT_DM_PHASE_GPIO_Port, RIGHT_DM_PHASE_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(RIGHT_DM_PHASE_GPIO_Port, RIGHT_DM_PHASE_Pin, GPIO_PIN_SET);
 	HAL_GPIO_WritePin(LEFT_DM_PHASE_GPIO_Port, LEFT_DM_PHASE_Pin, GPIO_PIN_SET);
 }
 
-/*
- * Calculate Servo Rotation:
- * Given an angle, map to servo values within
- * the range 500 -> 2500 where 500 is -90 degrees
- * and 2500 is 90 degrees
- *
- * Formular:
- * https://stackoverflow.com/questions/5731863/mapping-a-numeric-range-onto-another
- */
-int calcServoRotation(float turningAngle) {
-	float rotation = 500 + round(11.11 * (turningAngle + 90));
-
-	if(rotation <= 500) {
-		return 500;
-	} else if (rotation >= 2500) {
-		return 2500;
-	} else {
-		return rotation;
-	}
-}
 
 /*
  * Calculate Motor Speed:
@@ -206,8 +179,8 @@ int calcServoRotation(float turningAngle) {
  * https://stackoverflow.com/questions/5731863/mapping-a-numeric-range-onto-another
  * (output_end - output_start) / (input_end - input_start)
  */
-float calcMotorSpeed(float directionAmount) {
-	float speed = round(0.68 * (directionAmount - 25));
+float calcMotorSpeed(float turn_amount) {
+	float speed = round(0.68 * (turn_amount - 25));
 
 	if(speed <= 20) {
 		return 20;
@@ -218,12 +191,16 @@ float calcMotorSpeed(float directionAmount) {
 	}
 }
 
+
 /*
  * Get Distance:
- * Map ADC values to distance (in cm) based on predetermined measurements.
+ * Map ADC values to distance (in cm).
+ * First we transform analog output to voltage values
  *
- * https://www.hackster.io/tothmiki91/infrared-radar-with-sharp-distance-sensor-91554a
+ * Then based on the IR sensor datasheet graph, we determine
+ * an equation to get accurate distance levels in centimeters.
  */
+
 float getDistance(float adcVal)
 {
   float voltageVal = (3.3 * adcVal) / 4096;
@@ -244,49 +221,30 @@ float getDistance(float adcVal)
   }
 }
 
-/*
- * Calculate best path:
- * Boat should always move in the direction with the best possible space
- */
-void calcBestPath(uint16_t ir_left, uint16_t ir_center, uint16_t ir_right, float* turningAngle, float* directionAmount)
-{
-	float vv_left, vh_left;
-	float vv_right, vh_right;
-	float net_vertical, net_horizontal;
-
-    // Resolve left sensor readings to vertical and horizontal plane
-	vv_left = sinf(sensor_angle * (M_PI / 180.0)) * ir_left;
-	vh_left = cosf(sensor_angle * (M_PI / 180.0)) * ir_left;
-
-	// Resolve right sensor readings to vertical and horizontal plane
-	vv_right = sinf(sensor_angle * (M_PI / 180.0)) * ir_right;
-	vh_right = cosf(sensor_angle * (M_PI / 180.0)) * ir_right;
-
-	// Calculate sum of all three vectors
-	net_vertical = vv_left + ir_center + vv_right;
-	net_horizontal = -(vh_left) + vh_right;
-
-	// Calculate angle servo motor should turn as well as approximate value for free space.
-	// Free space amount will be used to control speed.
-	*turningAngle = atanf(net_horizontal / net_vertical) / (M_PI / 180.0) * STEERING_CONSTANT;
-	*directionAmount = sqrtf(powf(net_horizontal, 2) + powf(net_vertical, 2));
-}
 
 /*
- * Set Motion Settings:
- * Based on path calculation, configure servo and speed PWM
+ * Steer Boat (WIP):
+ * Get turn amount by comparing the difference
+ * between left and right distance.
+ *
+ * if turn amount is positive, the boat needs to turn left
+ * if turn amount is negative, the boat needs to turn right
+ * Constraint: 0 < turn_amount < 140
  */
-void setMotionSettings(float turningAngle, float directionAmount, float avgDistance)
+
+void steerBoat(float left_dist, float front_dist, float right_dist)
 {
-	 float speed = calcMotorSpeed(directionAmount);
-	uint16_t rotation = calcServoRotation(turningAngle);
+	float turn_amount = left_dist - right_dist;
+	float speed = calcMotorSpeed(fabs(turn_amount));
 
-	__HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, rotation);
-
-	if(avgDistance <= SPEED_LIMIT) {
-		setMotorSpeed(speed);
+	if(turn_amount < 0) {
+//		Turn Right
+//		setMotorSpeed(ms_right, ms_left);
+	} else if(turn_amount > 0) {
+//		Turn Left
+//		setMotorSpeed(ms_right, ms_left);
 	} else {
-		setMotorSpeed(255);
+		setMotorSpeed(255, 255);
 	}
 }
 
@@ -327,8 +285,15 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   uint8_t powerBtnState;
-  uint16_t ir_left, ir_center, ir_right;
-  float turningAngle, directionAmount, avg_distance;
+
+  float left_dist, front_dist, right_dist;
+
+  uint16_t ir_left = 0;
+  uint16_t ir_front = 0;
+  uint16_t ir_right = 0;
+
+  float left_stored_dist = 0;
+  float right_stored_dist = 0;
 
   HAL_TIM_Base_Start(&htim1);
   HAL_TIM_Base_Start(&htim17);
@@ -349,19 +314,35 @@ int main(void)
 		powerBtnState = HAL_GPIO_ReadPin(POWER_BTN_GPIO_Port, POWER_BTN_Pin);
 
 		if (togglePowerBtn(powerBtnState) == 1) {
-			ir_left = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_1));
-			ir_center = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_2));
-			ir_right = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_4));
+			// Average out readings from sensor to get more accurate data
+			for(int i = 0; i < 3; i++) {
+				ir_left += ADC_Read(&hadc1, ADC_CHANNEL_1);
+				ir_front += ADC_Read(&hadc1, ADC_CHANNEL_2);
+				ir_right += ADC_Read(&hadc1, ADC_CHANNEL_4);
+			}
 
-			avg_distance = (ir_left + ir_center + ir_right) / 3;
+			// Get distance in cm for all three sensors
+			left_dist = getDistance(ir_left / 3);
+			front_dist = getDistance(ir_front / 3);
+			right_dist = getDistance(ir_right / 3);
 
-			calcBestPath(ir_left, ir_center, ir_right, &turningAngle, &directionAmount);
-			setMotionSettings(turningAngle, directionAmount, avg_distance);
+			// Store distance values to know which turn position to favor
+			if(left_stored_dist > 0 && right_stored_dist > 0) {
+				left_stored_dist += left_dist;
+				right_stored_dist += right_dist;
 
-			moveForward();
+				left_stored_dist /= 2;
+				right_stored_dist /= 2;
+			} else {
+				left_stored_dist = left_dist;
+				right_stored_dist = right_dist;
+			}
+
+			// Base Steering
+			steerBoat(left_dist, front_dist, right_dist);
+
 		} else {
-			__HAL_TIM_SET_COMPARE(&htim17, TIM_CHANNEL_1, 1500);
-			setMotorSpeed(0);
+			setMotorSpeed(0, 0);
 		}
     /* USER CODE END WHILE */
 
