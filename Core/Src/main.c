@@ -28,11 +28,6 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
-typedef struct {
-  float distance;
-  float adcVal;
-} S_DIST_ADC_MAP;
-
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -40,7 +35,8 @@ typedef struct {
 #define DISTANCE_MAX          150
 #define DISTANCE_MIN          10
 #define DISTANCE_THRESHOLD    0
-#define SPEED_LIMIT           30 // Maximum speed limit in cm
+#define MAX_SPEED             255
+#define MIN_SPEED             125
 
 /* USER CODE END PD */
 
@@ -171,28 +167,6 @@ void moveBackward()
 
 
 /*
- * Calculate Motor Speed:
- * Given an angle, map to motor values within
- * the range 0 -> 255 where 0 is 10 and 255 is SPEED_LIMIT
- *
- * Formular:
- * https://stackoverflow.com/questions/5731863/mapping-a-numeric-range-onto-another
- * (output_end - output_start) / (input_end - input_start)
- */
-float calcMotorSpeed(float turn_amount) {
-	float speed = round(0.68 * (turn_amount - 25));
-
-	if(speed <= 20) {
-		return 20;
-	} else if (speed >= 255) {
-		return 255;
-	} else {
-		return speed;
-	}
-}
-
-
-/*
  * Get Distance:
  * Map ADC values to distance (in cm).
  * First we transform analog output to voltage values
@@ -223,26 +197,45 @@ float getDistance(float adcVal)
 
 
 /*
+ * Calculate Motor Speed:
+ * Given an angle, map to motor values within
+ * the range 0 -> 255 where 0 is 10 and 255 is SPEED_LIMIT
+ *
+ * Formular:
+ * https://stackoverflow.com/questions/5731863/mapping-a-numeric-range-onto-another
+ * (output_end - output_start) / (input_end - input_start)
+ */
+float calcMotorSpeed(float dist_diff) {
+	float speed = MIN_SPEED + ((dist_diff / (DISTANCE_MAX - DISTANCE_MIN)) * (MAX_SPEED - MIN_SPEED));
+
+	if(speed <= MIN_SPEED) {
+		return MIN_SPEED;
+	} else if (speed >= MAX_SPEED) {
+		return MAX_SPEED;
+	} else {
+		return speed;
+	}
+}
+
+/*
  * Steer Boat (WIP):
  * Get turn amount by comparing the difference
  * between left and right distance.
  *
  * if turn amount is positive, the boat needs to turn left
  * if turn amount is negative, the boat needs to turn right
- * Constraint: 0 < turn_amount < 140
+ * Constraint: 0 <= turn_amount <= 140
  */
 
-void steerBoat(float left_dist, float front_dist, float right_dist)
+void steerBoat(float left_dist, float right_dist)
 {
-	float turn_amount = left_dist - right_dist;
-	float speed = calcMotorSpeed(fabs(turn_amount));
+	float dist_diff = left_dist - right_dist;
+	float speed = calcMotorSpeed(fabs(dist_diff));
 
-	if(turn_amount < 0) {
-//		Turn Right
-//		setMotorSpeed(ms_right, ms_left);
-	} else if(turn_amount > 0) {
-//		Turn Left
-//		setMotorSpeed(ms_right, ms_left);
+	if(dist_diff < 0) {
+		setMotorSpeed(255, speed);
+	} else if(dist_diff > 0) {
+		setMotorSpeed(speed, 255);
 	} else {
 		setMotorSpeed(255, 255);
 	}
@@ -314,6 +307,7 @@ int main(void)
 		powerBtnState = HAL_GPIO_ReadPin(POWER_BTN_GPIO_Port, POWER_BTN_Pin);
 
 		if (togglePowerBtn(powerBtnState) == 1) {
+
 			// Average out readings from sensor to get more accurate data
 			for(int i = 0; i < 3; i++) {
 				ir_left += ADC_Read(&hadc1, ADC_CHANNEL_1);
@@ -339,7 +333,7 @@ int main(void)
 			}
 
 			// Base Steering
-			steerBoat(left_dist, front_dist, right_dist);
+			steerBoat(left_dist, right_dist);
 
 		} else {
 			setMotorSpeed(0, 0);
