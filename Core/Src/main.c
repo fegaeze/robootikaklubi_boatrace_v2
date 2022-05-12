@@ -34,7 +34,7 @@
 /* USER CODE BEGIN PD */
 #define DISTANCE_MAX          150
 #define DISTANCE_MIN          10
-#define DISTANCE_THRESHOLD    0
+#define DISTANCE_THRESHOLD    10
 #define MAX_SPEED             255
 #define MIN_SPEED             125
 
@@ -71,7 +71,7 @@ static void MX_TIM17_Init(void);
 /* USER CODE BEGIN PFP */
 
 static void setInitialState(uint8_t powerBtnState);
-static void setMotorSpeed(uint8_t ms_right, uint8_t ms_left);
+static void setMotorSpeed(int32_t left, int32_t right);
 
 /* USER CODE END PFP */
 
@@ -120,7 +120,14 @@ uint16_t ADC_Read(ADC_HandleTypeDef* hadc, uint8_t channel)
   HAL_ADC_Start(hadc);
   HAL_ADC_PollForConversion(hadc, 10);
 
-  return HAL_ADC_GetValue(hadc);
+  uint64_t sum = 0;
+  for (int i = 0; i < 3; i++) {
+  	sum+= HAL_ADC_GetValue(hadc);
+  }
+
+  sum = sum / 3;
+
+  return sum;
 }
 
 /*
@@ -132,37 +139,6 @@ void setInitialState(uint8_t powerBtnState)
 	if (togglePowerBtn(powerBtnState) == 1) {
 	  setMotorSpeed(255, 255);
 	}
-}
-
-/*
- * Set Motor Speed:
- * motor_speed => 0 -> 255
- */
-void setMotorSpeed(uint8_t ms_right, uint8_t ms_left)
-{
-	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, ms_right);
-	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, ms_left);
-}
-
-/*
- * Move Forward:
- * xPhase => 0
- */
-void moveForward()
-{
-	HAL_GPIO_WritePin(RIGHT_DM_PHASE_GPIO_Port, RIGHT_DM_PHASE_Pin, GPIO_PIN_RESET);
-	HAL_GPIO_WritePin(LEFT_DM_PHASE_GPIO_Port, LEFT_DM_PHASE_Pin, GPIO_PIN_RESET);
-}
-
-
-/*
- * Move Backward:
- * xPhase => 1
- */
-void moveBackward()
-{
-	HAL_GPIO_WritePin(RIGHT_DM_PHASE_GPIO_Port, RIGHT_DM_PHASE_Pin, GPIO_PIN_SET);
-	HAL_GPIO_WritePin(LEFT_DM_PHASE_GPIO_Port, LEFT_DM_PHASE_Pin, GPIO_PIN_SET);
 }
 
 
@@ -227,17 +203,60 @@ float calcMotorSpeed(float dist_diff) {
  * Constraint: 0 <= turn_amount <= 140
  */
 
-void steerBoat(float left_dist, float right_dist)
+void steerBoat(float left_dist, float front_dist, float right_dist)
 {
+	float speed;
 	float dist_diff = left_dist - right_dist;
-	float speed = calcMotorSpeed(fabs(dist_diff));
 
-	if(dist_diff < 0) {
-		setMotorSpeed(255, speed);
-	} else if(dist_diff > 0) {
-		setMotorSpeed(speed, 255);
+	if(front_dist > 20) {
+		speed = MAX_SPEED;
 	} else {
-		setMotorSpeed(255, 255);
+		speed = calcMotorSpeed(fabsf(dist_diff));
+	}
+
+
+	if(dist_diff < -DISTANCE_THRESHOLD) { //Left
+		HAL_Delay(100);
+	    setMotorSpeed(0, 100);
+	} else if(dist_diff > DISTANCE_THRESHOLD) {//Right
+	    HAL_Delay(100);
+	    setMotorSpeed(100, 0);
+	} else {
+		setMotorSpeed(-255, -255);
+	}
+
+}
+
+/*
+ * Steer Boat (WIP):
+ * Get turn amount by comparing the difference
+ * between left and right distance.
+ *
+ * if turn amount is positive, the boat needs to turn left
+ * if turn amount is negative, the boat needs to turn right
+ * Constraint: 0 <= turn_amount <= 140
+ */
+void setMotorSpeed(int32_t left, int32_t right) {
+	if (left > 0)
+	{
+		__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, -1 * left);
+		HAL_GPIO_WritePin(LEFT_DM_PHASE_GPIO_Port, LEFT_DM_PHASE_Pin, 1);
+	}
+	else
+	{
+		__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, left);
+		HAL_GPIO_WritePin(LEFT_DM_PHASE_GPIO_Port, LEFT_DM_PHASE_Pin, 0);
+	}
+
+	if (right > 0)
+	{
+		__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, -1 * right);
+		HAL_GPIO_WritePin(RIGHT_DM_PHASE_GPIO_Port, RIGHT_DM_PHASE_Pin, 0);
+	}
+	else
+	{
+		__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, right);
+		HAL_GPIO_WritePin(RIGHT_DM_PHASE_GPIO_Port, RIGHT_DM_PHASE_Pin, 1);
 	}
 }
 
@@ -281,10 +300,6 @@ int main(void)
 
   float left_dist, front_dist, right_dist;
 
-  uint16_t ir_left = 0;
-  uint16_t ir_front = 0;
-  uint16_t ir_right = 0;
-
   float left_stored_dist = 0;
   float right_stored_dist = 0;
 
@@ -308,17 +323,10 @@ int main(void)
 
 		if (togglePowerBtn(powerBtnState) == 1) {
 
-			// Average out readings from sensor to get more accurate data
-			for(int i = 0; i < 3; i++) {
-				ir_left += ADC_Read(&hadc1, ADC_CHANNEL_1);
-				ir_front += ADC_Read(&hadc1, ADC_CHANNEL_2);
-				ir_right += ADC_Read(&hadc1, ADC_CHANNEL_4);
-			}
+			left_dist = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_1));
+			front_dist = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_2));
+			right_dist = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_4));
 
-			// Get distance in cm for all three sensors
-			left_dist = getDistance(ir_left / 3);
-			front_dist = getDistance(ir_front / 3);
-			right_dist = getDistance(ir_right / 3);
 
 			// Store distance values to know which turn position to favor
 			if(left_stored_dist > 0 && right_stored_dist > 0) {
@@ -332,8 +340,13 @@ int main(void)
 				right_stored_dist = right_dist;
 			}
 
+			if(front_dist < 15) {
+				setMotorSpeed(255, 255);
+				HAL_Delay(100);
+			} else {
+				steerBoat(left_dist, front_dist, right_dist);
+			}
 			// Base Steering
-			steerBoat(left_dist, right_dist);
 
 		} else {
 			setMotorSpeed(0, 0);
