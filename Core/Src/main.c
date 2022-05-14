@@ -196,7 +196,7 @@ float calcMotorSpeed(float dist_diff) {
 }
 
 /*
- * Steer Boat (WIP):
+ * Steer Boat:
  * Get turn amount by comparing the difference
  * between left and right distance.
  *
@@ -207,34 +207,26 @@ float calcMotorSpeed(float dist_diff) {
 
 void steerBoat(float left_dist, float front_dist, float right_dist)
 {
-	float speed;
 	float dist_diff = left_dist - right_dist;
 
 	if(front_dist > 100) {
-		setMotorSpeed(-255, -255);
+		setMotorSpeed(-MAX_SPEED, -MAX_SPEED);
 	} else {
-		speed = calcMotorSpeed(fabsf(dist_diff));
-
-		if(dist_diff < -DISTANCE_THRESHOLD) { //Left
+		if(dist_diff < -DISTANCE_THRESHOLD) { // Left Turn
 			HAL_Delay(100);
 			setMotorSpeed(-50, 100);
-		} else if(dist_diff > DISTANCE_THRESHOLD) {//Right
+		} else if(dist_diff > DISTANCE_THRESHOLD) {// Right Turn
 			HAL_Delay(100);
 			setMotorSpeed(100, -50);
 		} else {
-			setMotorSpeed(-255, -255);
+			setMotorSpeed(-MAX_SPEED, -MAX_SPEED);
 		}
 	}
 }
 
 /*
- * Steer Boat (WIP):
- * Get turn amount by comparing the difference
- * between left and right distance.
+ * Set Motor Speed:
  *
- * if turn amount is positive, the boat needs to turn left
- * if turn amount is negative, the boat needs to turn right
- * Constraint: 0 <= turn_amount <= 140
  */
 void setMotorSpeed(int32_t left, int32_t right) {
 	if (left > 0)
@@ -350,13 +342,13 @@ int main(void)
 			}
 
 			if(front_dist < 15) {
-				setMotorSpeed(255, 255);
+				setMotorSpeed(MAX_SPEED, MAX_SPEED);
 				HAL_Delay(1000);
 
 				if(left_stored_dist < right_stored_dist) {
-					setMotorSpeed(-255, 255);
+					setMotorSpeed(-MAX_SPEED, MAX_SPEED);
 				} else if(left_stored_dist > right_stored_dist) {
-					setMotorSpeed(255, -255);
+					setMotorSpeed(MAX_SPEED, -MAX_SPEED);
 				}
 
 				HAL_Delay(300);
