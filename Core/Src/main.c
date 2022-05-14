@@ -217,10 +217,10 @@ void steerBoat(float left_dist, float front_dist, float right_dist)
 
 		if(dist_diff < -DISTANCE_THRESHOLD) { //Left
 			HAL_Delay(100);
-			setMotorSpeed(0, 100);
+			setMotorSpeed(-50, 100);
 		} else if(dist_diff > DISTANCE_THRESHOLD) {//Right
 			HAL_Delay(100);
-			setMotorSpeed(100, 0);
+			setMotorSpeed(100, -50);
 		} else {
 			setMotorSpeed(-255, -255);
 		}
@@ -327,6 +327,8 @@ int main(void)
 
 			if(delay == 0) {
 				setInitialState();
+				left_stored_dist = 0;
+				right_stored_dist = 0;
 				delay = 1;
 			 }
 
