@@ -59,6 +59,8 @@ int block = 0;
 int byteStream = 0;
 int buttonState = 0;
 
+int delay = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -70,7 +72,7 @@ static void MX_ADC1_Init(void);
 static void MX_TIM17_Init(void);
 /* USER CODE BEGIN PFP */
 
-static void setInitialState(uint8_t powerBtnState);
+static void setInitialState();
 static void setMotorSpeed(int32_t left, int32_t right);
 
 /* USER CODE END PFP */
@@ -134,11 +136,11 @@ uint16_t ADC_Read(ADC_HandleTypeDef* hadc, uint8_t channel)
  * Set Initial State:
  * Set speed to highest settings
  */
-void setInitialState(uint8_t powerBtnState)
+void setInitialState()
 {
-	if (togglePowerBtn(powerBtnState) == 1) {
-	  setMotorSpeed(255, 255);
-	}
+	HAL_Delay(5000);
+	setMotorSpeed(-255, -255);
+	HAL_Delay(2000);
 }
 
 
@@ -208,23 +210,21 @@ void steerBoat(float left_dist, float front_dist, float right_dist)
 	float speed;
 	float dist_diff = left_dist - right_dist;
 
-	if(front_dist > 20) {
-		speed = MAX_SPEED;
+	if(front_dist > 100) {
+		setMotorSpeed(-255, -255);
 	} else {
 		speed = calcMotorSpeed(fabsf(dist_diff));
+
+		if(dist_diff < -DISTANCE_THRESHOLD) { //Left
+			HAL_Delay(100);
+			setMotorSpeed(0, 100);
+		} else if(dist_diff > DISTANCE_THRESHOLD) {//Right
+			HAL_Delay(100);
+			setMotorSpeed(100, 0);
+		} else {
+			setMotorSpeed(-255, -255);
+		}
 	}
-
-
-	if(dist_diff < -DISTANCE_THRESHOLD) { //Left
-		HAL_Delay(100);
-	    setMotorSpeed(0, 100);
-	} else if(dist_diff > DISTANCE_THRESHOLD) {//Right
-	    HAL_Delay(100);
-	    setMotorSpeed(100, 0);
-	} else {
-		setMotorSpeed(-255, -255);
-	}
-
 }
 
 /*
@@ -310,8 +310,6 @@ int main(void)
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim17, TIM_CHANNEL_1);
 
-  powerBtnState = HAL_GPIO_ReadPin(POWER_BTN_GPIO_Port, POWER_BTN_Pin);
-  setInitialState(powerBtnState);
 
   /* USER CODE END 2 */
 
@@ -321,7 +319,16 @@ int main(void)
   {
 		powerBtnState = HAL_GPIO_ReadPin(POWER_BTN_GPIO_Port, POWER_BTN_Pin);
 
+		if(togglePowerBtn(powerBtnState) == 0 && delay == 1) {
+			delay = 0;
+		}
+
 		if (togglePowerBtn(powerBtnState) == 1) {
+
+			if(delay == 0) {
+				setInitialState();
+				delay = 1;
+			 }
 
 			left_dist = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_1));
 			front_dist = getDistance(ADC_Read(&hadc1, ADC_CHANNEL_2));
@@ -342,11 +349,18 @@ int main(void)
 
 			if(front_dist < 15) {
 				setMotorSpeed(255, 255);
-				HAL_Delay(100);
+				HAL_Delay(1000);
+
+				if(left_stored_dist < right_stored_dist) {
+					setMotorSpeed(-255, 255);
+				} else if(left_stored_dist > right_stored_dist) {
+					setMotorSpeed(255, -255);
+				}
+
+				HAL_Delay(300);
 			} else {
 				steerBoat(left_dist, front_dist, right_dist);
 			}
-			// Base Steering
 
 		} else {
 			setMotorSpeed(0, 0);
